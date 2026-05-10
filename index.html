@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wikimedia Commons Image Downloader</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; padding: 30px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { margin-bottom: 8px; color: #333; }
+    p.subtitle { color: #666; margin-bottom: 20px; }
+    textarea, .id-input {
+      width: 100%; height: 200px; padding: 12px; font-size: 14px;
+      border: 2px solid #ccc; border-radius: 6px; resize: vertical;
+      font-family: 'Consolas', monospace;
+    }
+    textarea:focus, .id-input:focus { outline: none; border-color: #3572b0; }
+    .input-row { display: flex; gap: 16px; }
+    .input-col { flex: 1; min-width: 0; }
+    .input-col label { display: block; font-weight: 600; margin-bottom: 6px; color: #444; font-size: 14px; }
+    .prefix-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .prefix-row label { font-weight: 600; color: #444; font-size: 14px; margin: 0; }
+    .prefix-row input {
+      padding: 4px 8px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px;
+      font-family: 'Consolas', monospace; width: 160px;
+    }
+    .prefix-row input:focus { outline: none; border-color: #3572b0; }
+    .settings-row {
+      display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap;
+      background: #fff; padding: 12px 16px; border-radius: 6px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .setting { flex: 1; min-width: 120px; }
+    .setting label { display: block; font-size: 13px; font-weight: 600; color: #444; margin-bottom: 4px; }
+    .setting label span { color: #3572b0; }
+    .setting input[type="range"] { width: 100%; accent-color: #3572b0; }
+    .setting input[type="checkbox"] { accent-color: #3572b0; vertical-align: middle; }
+    .btn-row { margin-top: 12px; display: flex; gap: 10px; align-items: center; }
+    button {
+      padding: 10px 24px; font-size: 15px; border: none; border-radius: 6px;
+      cursor: pointer; font-weight: 600; transition: background 0.2s;
+    }
+    #fetchBtn { background: #3572b0; color: #fff; }
+    #fetchBtn:hover { background: #2a5a8e; }
+    #fetchBtn:disabled { background: #999; cursor: not-allowed; }
+    #downloadAllBtn { background: #2e7d32; color: #fff; display: none; }
+    #downloadAllBtn:hover { background: #1b5e20; }
+    #clearBtn { background: #e0e0e0; color: #333; }
+    #clearBtn:hover { background: #ccc; }
+    #exportLogBtn { background: #6a1b9a; color: #fff; }
+    #exportLogBtn:hover { background: #4a148c; }
+    .log-count { font-size: 13px; color: #888; margin-left: 6px; }
+    .status { margin-top: 12px; font-size: 14px; color: #555; }
+    .progress-bar {
+      margin-top: 8px; height: 6px; background: #ddd; border-radius: 3px;
+      overflow: hidden; display: none;
+    }
+    .progress-bar .fill {
+      height: 100%; background: #3572b0; width: 0%; transition: width 0.3s;
+    }
+    .results { margin-top: 24px; }
+    .card {
+      background: #fff; border-radius: 8px; padding: 14px; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .card img {
+      width: 80px; height: 80px; object-fit: cover; border-radius: 4px;
+      background: #eee; flex-shrink: 0;
+    }
+    .card .info { flex: 1; min-width: 0; }
+    .card .info .filename {
+      font-weight: 600; font-size: 14px; word-break: break-all; color: #333;
+    }
+    .card .info .filename-edit {
+      font-size: 13px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px;
+      width: 100%; font-family: 'Consolas', monospace; margin-top: 4px;
+    }
+    .card .info .filename-edit:focus { outline: none; border-color: #3572b0; }
+    .card .info .url-link {
+      font-size: 12px; color: #3572b0; word-break: break-all;
+      display: block; margin-top: 4px;
+    }
+    .card .info .error { color: #c62828; font-size: 13px; }
+    .card .info .license {
+      font-size: 12px; color: #555; margin-top: 4px;
+      display: flex; flex-wrap: wrap; gap: 4px; align-items: center;
+    }
+    .card .info .license .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 11px; font-weight: 600; background: #e8f5e9; color: #2e7d32;
+    }
+    .card .info .license .badge.unknown { background: #fff3e0; color: #e65100; }
+    .card .info .license .author { color: #777; font-size: 11px; }
+    .card .dl-btn {
+      padding: 6px 16px; background: #3572b0; color: #fff; border: none;
+      border-radius: 4px; cursor: pointer; font-size: 13px; white-space: nowrap;
+    }
+    .card .dl-btn:hover { background: #2a5a8e; }
+    .card.error-card { border-left: 4px solid #c62828; }
+    .card.success-card { border-left: 4px solid #2e7d32; }
+    .sql-section { margin-top: 30px; }
+    .sql-section label { display: block; font-weight: 600; margin-bottom: 6px; color: #444; font-size: 14px; }
+    .sql-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .sql-header button {
+      padding: 5px 14px; font-size: 13px; background: #3572b0; color: #fff;
+      border: none; border-radius: 4px; cursor: pointer;
+    }
+    .sql-header button:hover { background: #2a5a8e; }
+    #sqlOutput {
+      width: 100%; height: 300px; padding: 12px; font-size: 13px;
+      border: 2px solid #ccc; border-radius: 6px; resize: vertical;
+      font-family: 'Consolas', monospace; background: #1e1e1e; color: #d4d4d4;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Wikimedia Commons Image Downloader</h1>
+    <p class="subtitle">Paste image URLs or filenames below (one per line)</p>
+
+    <div class="input-row">
+      <div class="input-col">
+        <label>Image URLs / Filenames</label>
+        <textarea id="input" placeholder="Paste URLs or filenames here, one per line...
+https://upload.wikimedia.org/wikipedia/commons/0/0a/Rhincodon_typus_fgbnms.jpg
+20230520_Pelobatrachus_nasutus.jpg"></textarea>
+      </div>
+      <div class="input-col">
+        <label>IDs (optional, one per line)</label>
+        <textarea class="id-input" id="idInput" placeholder="Paste IDs from Excel here, one per line...
+5
+12
+23"></textarea>
+        <div class="prefix-row" style="margin-top: 6px;">
+          <label>Prefix:</label>
+          <input type="text" id="namePrefix" value="wildlife-" placeholder="e.g. wildlife-">
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-row">
+      <div class="setting">
+        <label>Quality <span id="qualityVal">20</span>%</label>
+        <input type="range" id="qualitySetting" min="1" max="100" value="20" oninput="document.getElementById('qualityVal').textContent=this.value">
+      </div>
+      <div class="setting">
+        <label>Colors <span id="colorsVal">24</span></label>
+        <input type="range" id="colorsSetting" min="2" max="256" value="24" oninput="document.getElementById('colorsVal').textContent=this.value">
+      </div>
+      <div class="setting">
+        <label>Dithering <span id="ditherVal">0.10</span></label>
+        <input type="range" id="ditherSetting" min="0" max="100" value="10" oninput="document.getElementById('ditherVal').textContent=(this.value/100).toFixed(2)">
+      </div>
+      <div class="setting">
+        <label><input type="checkbox" id="reducePalette" checked> Reduce Palette</label>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button id="fetchBtn" onclick="fetchImages()">Fetch Images</button>
+      <button id="downloadAllBtn" onclick="downloadAllAsZip()">Download All (WebP ZIP)</button>
+      <button id="clearBtn" onclick="clearAll()">Clear</button>
+      <button id="exportLogBtn" onclick="exportLog()">Export Log</button>
+      <span class="log-count" id="logCount"></span>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+    <div class="results" id="results"></div>
+
+    <div class="sql-section" id="sqlSection" style="display:none;">
+      <div class="sql-header">
+        <label style="margin:0">SQL INSERT Statements</label>
+        <button onclick="copySql()">Copy SQL</button>
+      </div>
+      <textarea id="sqlOutput" readonly></textarea>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = 'https://commons.wikimedia.org/w/api.php';
+    const LOG_KEY = 'wikimedia_downloader_log';
+    let resolvedImages = [];
+
+    // Restore last input on page load
+    (function restoreInput() {
+      const last = localStorage.getItem('wikimedia_downloader_last_input');
+      if (last) document.getElementById('input').value = last;
+      const lastIds = localStorage.getItem('wikimedia_downloader_last_ids');
+      if (lastIds) document.getElementById('idInput').value = lastIds;
+      const lastPrefix = localStorage.getItem('wikimedia_downloader_last_prefix');
+      if (lastPrefix !== null) document.getElementById('namePrefix').value = lastPrefix;
+      updateLogCount();
+    })();
+
+    function saveToLog(inputText) {
+      // Save current input for restore
+      localStorage.setItem('wikimedia_downloader_last_input', inputText);
+      localStorage.setItem('wikimedia_downloader_last_ids', document.getElementById('idInput').value);
+      localStorage.setItem('wikimedia_downloader_last_prefix', document.getElementById('namePrefix').value);
+
+      // Append to cumulative log
+      const existing = localStorage.getItem(LOG_KEY) || '';
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const entry = `--- ${timestamp} ---\n${inputText}\n\n`;
+      localStorage.setItem(LOG_KEY, existing + entry);
+      updateLogCount();
+    }
+
+    function updateLogCount() {
+      const log = localStorage.getItem(LOG_KEY) || '';
+      const count = (log.match(/^--- /gm) || []).length;
+      document.getElementById('logCount').textContent = count ? `(${count} log entries)` : '';
+    }
+
+    function exportLog() {
+      const log = localStorage.getItem(LOG_KEY);
+      if (!log) { alert('No log entries yet.'); return; }
+      const blob = new Blob([log], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'wikimedia_download_log.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    }
+
+    function getIdNames() {
+      const raw = document.getElementById('idInput').value;
+      const prefix = document.getElementById('namePrefix').value;
+      return raw.split(/[\r\n]+/)
+        .map(line => line.trim())
+        .map(line => line.length > 0 ? prefix + line : null);
+    }
+
+    function parseInput() {
+      const raw = document.getElementById('input').value;
+      return raw.split(/[\r\n]+/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => {
+          // Check if it's a full URL
+          if (line.startsWith('http://') || line.startsWith('https://')) {
+            // Extract filename from URL path
+            const url = new URL(line);
+            const pathParts = url.pathname.split('/');
+            const rawName = pathParts[pathParts.length - 1];
+            // If it's a thumb URL like /thumb/.../220px-Foo.jpg, get the original name
+            const thumbIdx = pathParts.indexOf('thumb');
+            let filename;
+            if (thumbIdx !== -1 && pathParts.length > thumbIdx + 4) {
+              filename = decodeURIComponent(pathParts[thumbIdx + 3]);
+            } else {
+              filename = decodeURIComponent(rawName);
+            }
+            return { filename, directUrl: line };
+          }
+          // Plain filename
+          const cleaned = line.replace(/^File:/i, '');
+          return { filename: cleaned, directUrl: null };
+        });
+    }
+
+    async function fetchImageInfo(entry) {
+      const { filename, directUrl } = entry;
+      try {
+        const params = new URLSearchParams({
+          action: 'query',
+          titles: 'File:' + filename,
+          prop: 'imageinfo',
+          iiprop: 'url|extmetadata',
+          iiextmetadatafilter: 'LicenseShortName|License|LicenseUrl|Artist|Attribution|ObjectName',
+          format: 'json',
+          origin: '*'
+        });
+        const resp = await fetch(API_URL + '?' + params);
+        const data = await resp.json();
+        const pages = data.query.pages;
+        const pageId = Object.keys(pages)[0];
+
+        let license = null;
+        let licenseUrl = null;
+        let author = null;
+        let authorUrl = null;
+        let sourceUrl = null;
+        let imageTitle = null;
+        let url = directUrl;
+
+        if (pageId !== '-1' && pages[pageId].imageinfo) {
+          const info = pages[pageId].imageinfo[0];
+          if (!url) url = info.url;
+          const meta = info.extmetadata || {};
+          if (meta.LicenseShortName) license = meta.LicenseShortName.value;
+          if (meta.LicenseUrl) licenseUrl = meta.LicenseUrl.value;
+          if (meta.ObjectName) {
+            imageTitle = meta.ObjectName.value;
+          } else {
+            // Fallback: use page title (filename without extension)
+            imageTitle = (pages[pageId].title || '').replace(/^File:/i, '').replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+          }
+          if (meta.Artist) {
+            // Extract author URL from HTML anchor if present
+            const tmp = document.createElement('div');
+            tmp.innerHTML = meta.Artist.value;
+            const authorLink = tmp.querySelector('a');
+            if (authorLink) authorUrl = authorLink.href;
+            author = tmp.textContent.trim();
+          }
+          // Build Commons file page URL
+          sourceUrl = 'https://commons.wikimedia.org/wiki/File:' + encodeURIComponent(filename);
+        }
+
+        if (!url) {
+          return { filename, error: 'File not found on Wikimedia Commons' };
+        }
+        return { filename, url, license, licenseUrl, author, authorUrl, sourceUrl, imageTitle };
+      } catch (e) {
+        // If API fails but we have a direct URL, still allow download
+        if (directUrl) {
+          return { filename, url: directUrl, license: null, licenseUrl: null, author: null, authorUrl: null, sourceUrl: null, imageTitle: null };
+        }
+        return { filename, error: 'API request failed: ' + e.message };
+      }
+    }
+
+    async function fetchImages() {
+      const entries = parseInput();
+      if (entries.length === 0) {
+        setStatus('No filenames entered.');
+        return;
+      }
+
+      // Auto-save input to log
+      saveToLog(document.getElementById('input').value);
+
+      // Get ID-based names if provided
+      const idNames = getIdNames();
+
+      const btn = document.getElementById('fetchBtn');
+      btn.disabled = true;
+      resolvedImages = [];
+      document.getElementById('results').innerHTML = '';
+      document.getElementById('downloadAllBtn').style.display = 'none';
+      showProgress(true);
+
+      let done = 0;
+      const total = entries.length;
+      setStatus(`Fetching 0 / ${total}...`);
+
+      // Process in batches of 5 to avoid hammering the API
+      const batchSize = 5;
+      for (let i = 0; i < entries.length; i += batchSize) {
+        const batch = entries.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(e => fetchImageInfo(e)));
+        for (const result of results) {
+          // Apply ID-based name if available
+          const globalIdx = resolvedImages.length;
+          if (idNames[globalIdx]) {
+            result.editedName = idNames[globalIdx];
+          }
+          resolvedImages.push(result);
+          appendCard(result);
+          done++;
+          setProgress(done / total * 100);
+          setStatus(`Fetching ${done} / ${total}...`);
+        }
+      }
+
+      const successCount = resolvedImages.filter(r => !r.error).length;
+      setStatus(`Done. ${successCount} found, ${total - successCount} not found.`);
+      if (successCount > 0) {
+        document.getElementById('downloadAllBtn').style.display = 'inline-block';
+      }
+      generateSql();
+      btn.disabled = false;
+    }
+
+    function appendCard(result) {
+      const container = document.getElementById('results');
+      const card = document.createElement('div');
+
+      if (result.error) {
+        card.className = 'card error-card';
+        card.innerHTML = `
+          <div style="width:80px;height:80px;background:#fce4ec;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:#c62828;font-size:24px;">✕</div>
+          <div class="info">
+            <div class="filename">${escapeHtml(result.filename)}</div>
+            <div class="error">${escapeHtml(result.error)}</div>
+          </div>`;
+      } else {
+        const licenseLabel = result.license || 'Unknown';
+        const badgeClass = result.license ? '' : ' unknown';
+        let licenseHtml = `<span class="badge${badgeClass}">${escapeHtml(licenseLabel)}</span>`;
+        if (result.licenseUrl) {
+          licenseHtml = `<a href="${escapeHtml(result.licenseUrl)}" target="_blank" style="text-decoration:none">${licenseHtml}</a>`;
+        }
+        const authorHtml = result.author ? `<span class="author">by ${escapeHtml(result.author)}</span>` : '';
+
+        const idx = resolvedImages.length - 1;
+        const baseName = result.editedName || result.filename.replace(/\.[^.]+$/, '');
+        card.className = 'card success-card';
+        card.innerHTML = `
+          <img src="${escapeHtml(result.url)}" alt="${escapeHtml(result.filename)}" loading="lazy">
+          <div class="info">
+            <div class="filename">${escapeHtml(result.filename)}</div>
+            <input class="filename-edit" type="text" value="${escapeHtml(baseName)}" data-idx="${idx}" onchange="updateName(this)" title="Edit output filename (without extension)">
+            <a class="url-link" href="${escapeHtml(result.url)}" target="_blank">${escapeHtml(result.url)}</a>
+            <div class="license">${licenseHtml} ${authorHtml}</div>
+          </div>
+          <button class="dl-btn" onclick="downloadOne('${escapeJs(result.url)}', '${escapeJs(result.filename)}')">Download</button>`;
+      }
+      container.appendChild(card);
+    }
+
+    async function downloadOne(url, filename) {
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+      } catch (e) {
+        // Fallback: open in new tab
+        window.open(url, '_blank');
+      }
+    }
+
+    function updateName(input) {
+      const idx = parseInt(input.dataset.idx);
+      resolvedImages[idx].editedName = input.value.trim();
+    }
+
+    function getOutputName(item) {
+      if (item.editedName) return item.editedName + '.webp';
+      return item.filename.replace(/\.[^.]+$/, '') + '.webp';
+    }
+
+    // ===== Color Quantization (Median Cut + Floyd-Steinberg Dithering) =====
+    function medianCut(pixels, maxColors) {
+      if (pixels.length === 0) return [[0, 0, 0]];
+      let boxes = [pixels];
+      while (boxes.length < maxColors) {
+        let maxRange = -1, maxIdx = 0, splitCh = 0;
+        for (let i = 0; i < boxes.length; i++) {
+          const box = boxes[i];
+          for (let ch = 0; ch < 3; ch++) {
+            let lo = 255, hi = 0;
+            for (const p of box) { if (p[ch] < lo) lo = p[ch]; if (p[ch] > hi) hi = p[ch]; }
+            if (hi - lo > maxRange) { maxRange = hi - lo; maxIdx = i; splitCh = ch; }
+          }
+        }
+        if (maxRange <= 0) break;
+        const box = boxes[maxIdx];
+        box.sort((a, b) => a[splitCh] - b[splitCh]);
+        const mid = Math.floor(box.length / 2);
+        boxes.splice(maxIdx, 1, box.slice(0, mid), box.slice(mid));
+      }
+      return boxes.map(box => {
+        let r = 0, g = 0, b = 0;
+        for (const p of box) { r += p[0]; g += p[1]; b += p[2]; }
+        const n = box.length;
+        return [Math.round(r / n), Math.round(g / n), Math.round(b / n)];
+      });
+    }
+
+    function findNearest(palette, r, g, b) {
+      let minD = Infinity, nearest = palette[0];
+      for (const c of palette) {
+        const dr = r - c[0], dg = g - c[1], db = b - c[2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < minD) { minD = d; nearest = c; }
+      }
+      return nearest;
+    }
+
+    function quantizeImage(imageData, maxColors, ditherAmount) {
+      const px = imageData.data, w = imageData.width, h = imageData.height;
+      // Sample pixels for palette extraction
+      const step = Math.max(1, Math.floor(px.length / 4 / 10000));
+      const samples = [];
+      for (let i = 0; i < px.length; i += step * 4) samples.push([px[i], px[i + 1], px[i + 2]]);
+      const palette = medianCut(samples, maxColors);
+      // Float buffer for error diffusion
+      const fp = new Float32Array(px.length);
+      for (let i = 0; i < px.length; i++) fp[i] = px[i];
+      const result = new Uint8ClampedArray(px.length);
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          const oR = fp[idx], oG = fp[idx + 1], oB = fp[idx + 2];
+          const clR = Math.max(0, Math.min(255, Math.round(oR)));
+          const clG = Math.max(0, Math.min(255, Math.round(oG)));
+          const clB = Math.max(0, Math.min(255, Math.round(oB)));
+          const near = findNearest(palette, clR, clG, clB);
+          result[idx] = near[0]; result[idx + 1] = near[1]; result[idx + 2] = near[2]; result[idx + 3] = px[idx + 3];
+          const eR = (oR - near[0]) * ditherAmount, eG = (oG - near[1]) * ditherAmount, eB = (oB - near[2]) * ditherAmount;
+          if (x + 1 < w) { const i = idx + 4; fp[i] += eR * 7 / 16; fp[i + 1] += eG * 7 / 16; fp[i + 2] += eB * 7 / 16; }
+          if (y + 1 < h) {
+            if (x > 0) { const i = ((y + 1) * w + x - 1) * 4; fp[i] += eR * 3 / 16; fp[i + 1] += eG * 3 / 16; fp[i + 2] += eB * 3 / 16; }
+            { const i = ((y + 1) * w + x) * 4; fp[i] += eR * 5 / 16; fp[i + 1] += eG * 5 / 16; fp[i + 2] += eB * 5 / 16; }
+            if (x + 1 < w) { const i = ((y + 1) * w + x + 1) * 4; fp[i] += eR / 16; fp[i + 1] += eG / 16; fp[i + 2] += eB / 16; }
+          }
+        }
+      }
+      return new ImageData(result, w, h);
+    }
+
+    // ===== WebP Encoder (via @jsquash/webp from Squoosh) =====
+    let _webpEncode = null;
+    async function getWebpEncode() {
+      if (!_webpEncode) {
+        const mod = await import('https://esm.sh/@jsquash/webp@1.4.0');
+        _webpEncode = mod.encode;
+      }
+      return _webpEncode;
+    }
+
+    function getCompressionSettings() {
+      return {
+        quality: parseInt(document.getElementById('qualitySetting').value),
+        maxColors: parseInt(document.getElementById('colorsSetting').value),
+        dithering: parseInt(document.getElementById('ditherSetting').value) / 100,
+        reducePalette: document.getElementById('reducePalette').checked,
+      };
+    }
+
+    // Squoosh-style compression: reduce palette → WebP encode
+    async function compressImage(url, { quality = 20, maxColors = 24, dithering = 0.1, reducePalette = true } = {}) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = async () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            // Step 1: Reduce palette (if enabled)
+            if (reducePalette) {
+              imageData = quantizeImage(imageData, maxColors, dithering);
+            }
+            // Step 2: Encode with WebP (libwebp via Squoosh)
+            const encode = await getWebpEncode();
+            const webpBuf = await encode(imageData, { quality });
+            resolve(new Blob([webpBuf], { type: 'image/webp' }));
+          } catch (e) {
+            reject(e);
+          }
+        };
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = url;
+      });
+    }
+
+    async function downloadAllAsZip() {
+      const items = resolvedImages.filter(r => !r.error);
+      if (items.length === 0) return;
+
+      const btn = document.getElementById('downloadAllBtn');
+      btn.disabled = true;
+      showProgress(true);
+      setStatus(`Compressing & zipping 0 / ${items.length}...`);
+
+      const zip = new JSZip();
+      let success = 0;
+      let failed = 0;
+
+      // Pre-load WebP WASM encoder
+      try { await getWebpEncode(); } catch (e) { console.warn('WebP WASM load failed, will use canvas fallback', e); }
+      const settings = getCompressionSettings();
+
+      for (let i = 0; i < items.length; i++) {
+        const name = getOutputName(items[i]);
+        try {
+          const webpBlob = await compressImage(items[i].url, settings);
+          zip.file(name, webpBlob);
+          success++;
+        } catch (e) {
+          // Fallback: fetch original and add as-is
+          try {
+            const resp = await fetch(items[i].url);
+            const blob = await resp.blob();
+            zip.file(items[i].editedName ? items[i].editedName + '.webp' : items[i].filename, blob);
+            success++;
+          } catch (e2) {
+            failed++;
+          }
+        }
+        setProgress((i + 1) / items.length * 100);
+        setStatus(`Compressing & zipping ${i + 1} / ${items.length}...`);
+      }
+
+      setStatus('Generating ZIP file...');
+      const zipBlob = await zip.generateAsync({ type: 'blob' }, meta => {
+        setProgress(meta.percent);
+      });
+
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = 'wikimedia_images.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+
+      setStatus(`Done! ${success} images zipped${failed ? `, ${failed} failed` : ''}.`);
+      btn.disabled = false;
+    }
+
+    function clearAll() {
+      document.getElementById('input').value = '';
+      document.getElementById('results').innerHTML = '';
+      document.getElementById('downloadAllBtn').style.display = 'none';
+      setStatus('');
+      showProgress(false);
+      resolvedImages = [];
+    }
+
+    function setStatus(msg) { document.getElementById('status').textContent = msg; }
+    function showProgress(show) { document.getElementById('progressBar').style.display = show ? 'block' : 'none'; }
+    function setProgress(pct) { document.getElementById('progressFill').style.width = pct + '%'; }
+
+    function escapeHtml(str) {
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+    function escapeJs(str) {
+      return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+
+    function sqlEscape(val) {
+      if (val === null || val === undefined || val === '') return 'NULL';
+      return "'" + String(val).replace(/'/g, "''") + "'";
+    }
+
+    function generateSql() {
+      const items = resolvedImages.filter(r => !r.error);
+      if (items.length === 0) {
+        document.getElementById('sqlSection').style.display = 'none';
+        return;
+      }
+
+      const statements = items.map(item => {
+        const outputName = getOutputName(item);
+        const title = item.imageTitle || item.filename.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
+        const cdnUrl = 'https://d1ap4awiq83k2q.cloudfront.net/all_assets/' + outputName;
+        return `INSERT INTO public.image (url, title, author_name, author_url, source_name, source_url, license_name, license_url)
+VALUES (
+  ${sqlEscape(cdnUrl)},
+  ${sqlEscape(title)},
+  ${sqlEscape(item.author)},
+  ${sqlEscape(item.authorUrl)},
+  'Wikimedia Commons',
+  ${sqlEscape(item.sourceUrl)},
+  ${sqlEscape(item.license)},
+  ${sqlEscape(item.licenseUrl)}
+)
+ON CONFLICT (url) DO NOTHING;`;
+      });
+
+      document.getElementById('sqlOutput').value = statements.join('\n\n');
+      document.getElementById('sqlSection').style.display = 'block';
+    }
+
+    function copySql() {
+      const el = document.getElementById('sqlOutput');
+      el.select();
+      navigator.clipboard.writeText(el.value).then(() => {
+        const btn = document.querySelector('.sql-header button');
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = orig, 1500);
+      });
+    }
+  </script>
+</body>
+</html>
